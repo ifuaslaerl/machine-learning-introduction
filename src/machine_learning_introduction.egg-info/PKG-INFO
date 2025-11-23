@@ -1,0 +1,13 @@
+Metadata-Version: 2.4
+Name: machine-learning-introduction
+Version: 0.1.0
+Summary: A comprehensive ML pipeline for credit scoring and regression.
+Author-email: Heraldo <your.email@example.com>
+Requires-Python: >=3.9
+Description-Content-Type: text/markdown
+Requires-Dist: pandas
+Requires-Dist: numpy
+Requires-Dist: matplotlib
+Requires-Dist: seaborn
+Requires-Dist: scikit-learn
+Requires-Dist: click
