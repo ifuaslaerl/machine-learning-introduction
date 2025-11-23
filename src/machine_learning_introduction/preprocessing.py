@@ -5,44 +5,29 @@ from collections import Counter
 import sklearn.base
 import matplotlib.pyplot as plt
 import seaborn as sns
-from bisect import bisect_left
 
 # --- Strategies ---
 
 def strategy_mean(lista):
     """Calculates mean, safe for NaN."""
-    asw = sum(lista) / len(lista)
-    if np.isnan(asw):
-        return 0
-    return asw
+    return lista.mean()
 
 def strategy_median(lista):
-    """Calculates median, safe for NaN."""
-    sorted_lista = sorted(lista)
-    n = len(sorted_lista)
-    meio = n // 2
-    asw = sorted_lista[meio]
-    try:
-        if np.isnan(asw):
-            return 0
-    except:
-        return asw
-    return asw
+    """Calculates median using optimized pandas method."""
+    return lista.median()
 
 def strategy_mode(lista):
     """Calculates mode."""
-    counter = Counter(lista)
-    if not counter:
+    # Pandas mode() returns a Series (could be multiple modes), take the first
+    modes = lista.mode()
+    if modes.empty:
         return 0
-    max_freq = max(counter.values())
-    asw = [item for item, freq in counter.items() if freq == max_freq][0]
-    return asw
+    return modes[0]
 
 def strategy_zero(lista):
     return 0
 
-# --- Legacy DataManager (Refactored from loader.py) ---
-
+# --- Legacy DataManager (Unchanged) ---
 class DataManager:
     def __init__(self, main_path: str):
         self.data = pd.read_csv(main_path)

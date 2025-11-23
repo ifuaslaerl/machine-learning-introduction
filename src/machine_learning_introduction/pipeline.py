@@ -2,8 +2,6 @@ import typing
 import pandas as pd
 import numpy as np
 from sklearn.base import TransformerMixin, BaseEstimator
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import accuracy_score
 
 class Pipeline:
     def __init__(self, 
@@ -23,17 +21,35 @@ class Pipeline:
         self.y_column = y_column
         self.identifier = identifier
         self.test_size = test_size
+        
+        # Dictionary to store learned imputation values from training data
+        self.imputation_values = {} 
     
-    def fill_categorical(self, df: pd.DataFrame):
-        """Fills categorical values using the provided strategy."""
+    def fill_categorical(self, df: pd.DataFrame, fit: bool = False):
+        """
+        Fills categorical values.
+        If fit=True, calculates the fill value from the current df (training) and stores it.
+        If fit=False, uses the stored value to fill.
+        """
         for col in df.select_dtypes(include=['object']).columns:
             if col != self.identifier and col != self.y_column:
-                df[col] = df[col].fillna(self.fill_categorical_strategy(df[col]))
+                if fit:
+                    # Learn the value (e.g., Mode) from training data
+                    fill_value = self.fill_categorical_strategy(df[col])
+                    self.imputation_values[col] = fill_value
+                else:
+                    # Use the value learned from training
+                    fill_value = self.imputation_values.get(col)
+                    
+                    # Fallback if column wasn't seen in training (rare)
+                    if fill_value is None: 
+                        fill_value = self.fill_categorical_strategy(df[col])
+
+                df[col] = df[col].fillna(fill_value)
         return df
 
     def encode_categorical(self, df: pd.DataFrame):
         """Converts categorical variables to dummies."""
-        # Identify categorical columns excluding identifiers/targets
         cols_to_encode = [col for col in df.select_dtypes(include=['object']).columns 
                           if col != self.identifier and col != self.y_column]
         
@@ -44,27 +60,38 @@ class Pipeline:
         df = df.drop(columns=cols_to_encode).join(df_dummies)
         return df
     
-    def fill_numerical(self, df: pd.DataFrame):
-        """Fills numerical values using the provided strategy."""
-        # Select numerical columns excluding target/identifier
+    def fill_numerical(self, df: pd.DataFrame, fit: bool = False):
+        """
+        Fills numerical values. 
+        Fit=True learns the mean/median from Train. 
+        Fit=False applies it to Test.
+        """
         cols = df.select_dtypes(include=[np.number]).columns
         cols = [c for c in cols if c != self.identifier and c != self.y_column]
 
         for col in cols:
-            df[col] = df[col].fillna(self.fill_numerical_strategy(df[col]))
+            if fit:
+                fill_value = self.fill_numerical_strategy(df[col])
+                self.imputation_values[col] = fill_value
+            else:
+                fill_value = self.imputation_values.get(col, 0) # Default to 0 if missing
+
+            df[col] = df[col].fillna(fill_value)
         return df
     
-    def normalize(self, df: pd.DataFrame):
-        """Normalizes numerical data if a scaler is provided."""
+    def normalize(self, df: pd.DataFrame, fit: bool = False):
+        """Normalizes data. Fits scaler only if fit=True."""
         if self.scaler is None:
             return df
             
         numerical_cols = df.select_dtypes(include=[np.number, int, float, bool]).columns
-        # Filter out identifiers and targets from scaling
         cols_to_scale = [c for c in numerical_cols if c != self.identifier and c != self.y_column]
         
         if cols_to_scale:
-            df[cols_to_scale] = self.scaler.fit_transform(df[cols_to_scale])
+            if fit:
+                df[cols_to_scale] = self.scaler.fit_transform(df[cols_to_scale])
+            else:
+                df[cols_to_scale] = self.scaler.transform(df[cols_to_scale])
             
         return df
 
@@ -76,7 +103,7 @@ class Pipeline:
         print(f"Excluded: {self.exclude_collumns}")
 
     def process(self, train: pd.DataFrame, validate: pd.DataFrame, see_action: bool = False):
-        """Process training and validation data, fit the model, and predict."""
+        """Process training and validation data safely without leakage."""
         
         # Save target and identifier
         y_train = train[self.y_column]
@@ -87,31 +114,34 @@ class Pipeline:
             train = train.drop(columns=[c for c in self.exclude_collumns if c in train.columns])
             validate = validate.drop(columns=[c for c in self.exclude_collumns if c in validate.columns])
         
-        # Preprocessing Pipeline
-        train = self.fill_categorical(train)
-        validate = self.fill_categorical(validate)
+        # 1. Fill Categorical (Fit on Train, Transform Validate)
+        train = self.fill_categorical(train, fit=True)
+        validate = self.fill_categorical(validate, fit=False)
         if see_action: print("Categorical data filled")
         
+        # 2. Encode (Dummies)
         train = self.encode_categorical(train)
         validate = self.encode_categorical(validate)
         if see_action: print("Data encoded")
         
-        train = self.fill_numerical(train)
-        validate = self.fill_numerical(validate)
+        # 3. Fill Numerical (Fit on Train, Transform Validate)
+        train = self.fill_numerical(train, fit=True)
+        validate = self.fill_numerical(validate, fit=False)
         if see_action: print("Numerical data filled")
         
-        # Align columns (handle missing dummy columns in validation)
+        # 4. Align columns
         train, validate = train.align(validate, join="left", axis=1, fill_value=0)
         
-        # Restore target and identifier after alignment (alignment might mess them up if missing)
+        # Restore target and identifier
         train[self.y_column] = y_train
         if ids_validate is not None:
             validate[self.identifier] = ids_validate
 
         if see_action: print("Columns aligned")
         
-        train = self.normalize(train)
-        validate = self.normalize(validate)
+        # 5. Normalize (Fit on Train, Transform Validate)
+        train = self.normalize(train, fit=True)
+        validate = self.normalize(validate, fit=False)
         if see_action: print("Data normalized")
         
         # Prepare X and y
